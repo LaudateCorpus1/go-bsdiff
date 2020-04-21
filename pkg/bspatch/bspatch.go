@@ -28,7 +28,6 @@ package bspatch
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -36,6 +35,12 @@ import (
 
 	"github.com/dsnet/compress/bzip2"
 	"github.com/gabstv/go-bsdiff/pkg/util"
+)
+
+// Variables for streaming
+var (
+	WriteBufferSize = 4096
+	ReadBufferSize  = 4096
 )
 
 // Bytes applies a patch with the oldfile to create the newfile
@@ -90,103 +95,6 @@ func File(oldfile, newfile, patchfile string) error {
 	newfw.Flush()
 	newf.Close()
 	return nil
-}
-
-// Variables for streaming
-var (
-	ErrUnequalReads = errors.New("byteAdder.Read: did not read equal number of bytes from both readers")
-	WriteBufferSize = 4096
-	ReadBufferSize  = 4096
-)
-
-type CorruptPatchError struct {
-	Name string
-}
-
-func newCorruptPatchError(e string) CorruptPatchError {
-	return CorruptPatchError{"corrupt patch: " + e}
-}
-
-// Functionally, consumers should handle a corrupt patch and a bz end error the same.
-func newCorruptPatchBzEndError(read int64, expected int64, label string, prevErr error) CorruptPatchError {
-	errmsg := fmt.Sprintf("corrupt patch or bz stream ended: %s read (%v/%v) ", label, read, expected)
-	if prevErr != nil {
-		errmsg += prevErr.Error()
-	}
-	return CorruptPatchError{errmsg}
-}
-
-func (e CorruptPatchError) Error() string {
-	return e.Name
-}
-
-type byteAddReader struct {
-	r1   io.Reader
-	r2   io.Reader
-	addb []byte
-}
-
-func newByteAddReader(r1 io.Reader, r2 io.Reader) byteAddReader {
-	return byteAddReader{
-		r1:   r1,
-		r2:   r2,
-		addb: make([]byte, ReadBufferSize),
-	}
-}
-
-// Read adds the bytes of the two readers and writes to using p as scratch space.
-func (ba byteAddReader) Read(p []byte) (written int, err error) {
-	chunk := min(len(p), ReadBufferSize)
-
-	for written < len(p) {
-		r1n, r1err := ba.r1.Read(ba.addb[:min(chunk, len(p)-written)])
-		r2n, r2err := ba.r2.Read(p[written:min(written+chunk, len(p))])
-		n := min(r1n, r2n)
-
-		for i := 0; i < n; i++ {
-			p[written+i] += ba.addb[i]
-		}
-		written += n
-
-		switch {
-		case r1n != r2n:
-			err = ErrUnequalReads
-			return
-		case r1err == nil && r2err == nil:
-			continue
-		case isNilorEOF(r1err) && isNilorEOF(r2err):
-			err = io.EOF
-			return
-		case !isNilorEOF(r1err) || !isNilorEOF(r2err):
-			err = fmt.Errorf("%s, %s", r1err, r2err)
-			return
-		}
-	}
-
-	return
-}
-
-func isNilorEOF(err error) bool {
-	return err == io.EOF || err == nil
-}
-
-type writeCounter struct {
-	w io.Writer
-	n int64
-}
-
-func newWriteCounter(w io.Writer) *writeCounter {
-	return &writeCounter{w, 0}
-}
-
-func (wc *writeCounter) Write(p []byte) (int, error) {
-	n, err := wc.w.Write(p)
-	wc.n += int64(n)
-	return n, err
-}
-
-func (wc writeCounter) Count() int64 {
-	return wc.n
 }
 
 func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
@@ -338,7 +246,6 @@ func patchb(oldfile, patch []byte) ([]byte, error) {
 	oldfby := bytes.NewReader(oldfile)
 	err := patchStream(oldfby, newfbuf, patch)
 	newfbuf.Flush()
-	fmt.Println(newfby)
 	return newfby.Bytes(), err
 }
 
