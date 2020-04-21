@@ -43,17 +43,44 @@ func TestPatch(t *testing.T) {
 		0xA4, 0x19, 0x82, 0x58, 0x5D, 0xC9, 0x14, 0xE1,
 		0x42, 0x41, 0x94, 0x94, 0xC1, 0x0C,
 	}
-	newfile, err := Bytes(oldfile, patchfile)
-	if err != nil {
-		t.Fatal(err)
+
+	tests := []struct {
+		wbufsz int
+		rbufsz int
+	}{
+		{50, 50},
+		{19, 19},
+		{1, 4},
+		{4, 1},
+		{2, 4},
+		{4, 2},
+		{3, 4},
+		{4, 3},
+		{4, 4},
+		{7, 9},
+		{9, 7},
 	}
-	if !bytes.Equal(newfile, newfilecomp) {
-		t.Fatal("expected:", newfilecomp, "got:", newfile)
+
+	for _, test := range tests {
+		WriteBufferSize = test.wbufsz
+		ReadBufferSize = test.rbufsz
+
+		desc := fmt.Sprintf("WriteBufferSize: %v, ReadBufferSize: %v", WriteBufferSize, ReadBufferSize)
+		newfile, err := Bytes(oldfile, patchfile)
+		if err != nil {
+			t.Errorf("With %s failed with error: %s", desc, err.Error())
+			continue
+		}
+		if !bytes.Equal(newfile, newfilecomp) {
+			res := fmt.Sprintf("expected: %v, got: %v", newfilecomp, newfile)
+			t.Errorf("With %s failed with unequal bytes %s", desc, res)
+			continue
+		}
 	}
 	// test invalid patch
-	_, err = Bytes(oldfile, oldfile)
+	_, err := Bytes(oldfile, oldfile)
 	if err == nil {
-		t.Fail()
+		t.Errorf("Invalid patch fail")
 	}
 }
 
@@ -233,14 +260,14 @@ func TestCorruptHeader(t *testing.T) {
 	if err == nil {
 		t.Fatal("header should be corrupt")
 	}
-	if err.Error()[:13] != "corrupt patch" {
+	if _, ok := err.(*CorruptPatchError); ok {
 		t.Fatal("header should be corrupt (2)")
 	}
 	_, err = Bytes(corruptPatch, corruptPatch)
 	if err == nil {
 		t.Fatal("header should be corrupt (3)")
 	}
-	if err.Error() != "corrupt patch (header BSDIFF40)" {
+	if _, ok := err.(*CorruptPatchError); ok {
 		t.Fatal("header should be corrupt (4)")
 	}
 	corruptPatch[0] = 0x42
@@ -250,7 +277,7 @@ func TestCorruptHeader(t *testing.T) {
 	if err == nil {
 		t.Fatal("header should be corrupt (5)")
 	}
-	if err.Error()[:15] != "corrupt patch (" {
+	if _, ok := err.(*CorruptPatchError); ok {
 		t.Fatal("header should be corrupt (6)")
 	}
 }
@@ -280,11 +307,11 @@ func TestZReadAll(t *testing.T) {
 	rr := &lowcaprdr{
 		read: make([]byte, 1024),
 	}
-	nr, err := zreadall(rr, buf, len(buf))
+	nr, err := zreadall(rr, buf, int64(len(buf)))
 	if err != nil {
 		t.Fail()
 	}
-	if nr != len(buf) {
+	if nr != int64(len(buf)) {
 		t.Fail()
 	}
 	if buf[16] != rr.read[16] {
