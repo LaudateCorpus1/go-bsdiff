@@ -39,8 +39,8 @@ import (
 
 // Variables for streaming
 var (
-	WriteBufferSize = 4096
-	ReadBufferSize  = 4096
+	writeBufferSize = 1024 * 1024
+	copyBufferSize  = 1024 * 1024
 )
 
 // Bytes applies a patch with the oldfile to create the newfile
@@ -69,27 +69,27 @@ func Reader(oldbin io.Reader, newbin io.Writer, patchf io.Reader) error {
 func File(oldfile, newfile, patchfile string) error {
 	oldf, err := os.Open(oldfile)
 	if err != nil {
-		return fmt.Errorf("could not open oldfile '%v': %v", oldfile, err.Error())
+		return fmt.Errorf("could not open oldfile '%s': %v", oldfile, err)
 	}
 	defer oldf.Close()
 
 	newf, err := os.Create(newfile)
 	if err != nil {
-		return fmt.Errorf("could not open or create newfile '%v': %v", newfile, err.Error())
+		return fmt.Errorf("could not open or create newfile '%s': %v", newfile, err)
 	}
 
 	patchbs, err := ioutil.ReadFile(patchfile)
 	if err != nil {
-		return fmt.Errorf("could not read patchfile '%v': %v", patchfile, err.Error())
+		return fmt.Errorf("could not read patchfile '%s': %v", patchfile, err)
 	}
 
-	newfw := bufio.NewWriterSize(newf, WriteBufferSize)
+	newfw := bufio.NewWriterSize(newf, writeBufferSize)
 	err = patchStream(oldf, newfw, patchbs)
 
 	if err != nil {
 		newf.Close()
 		os.Remove(newfile)
-		return fmt.Errorf("bspatch: %v", err.Error())
+		return fmt.Errorf("bspatch: %v", err)
 	}
 
 	newfw.Flush()
@@ -98,17 +98,17 @@ func File(oldfile, newfile, patchfile string) error {
 }
 
 func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
-	HeaderLen := 32
+	const HeaderLen = 32
 
 	// Reused container vars
 	var lenread int64
 	var errmsg string
 	header := make([]byte, HeaderLen)
 	hdbuf := make([]byte, 8)
-	ctrl := make([]int64, 3)
+	ctrip := make([]int64, 3)
 	// ctrl triple indices
 	var x, y, z = 0, 1, 2
-	cpBuf := make([]byte, WriteBufferSize)
+	cpBuf := make([]byte, copyBufferSize)
 
 	// Counter used for sanity checks
 	newfwc := newWriteCounter(newf)
@@ -154,87 +154,87 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 
 	// Close patch file and re-open it via libbzip2 at the right places
 	p = nil
-	cpfbz2 := bytes.NewReader(patch)
-	if _, err := cpfbz2.Seek(int64(HeaderLen), io.SeekStart); err != nil {
+	ctrlbz := bytes.NewReader(patch)
+	if _, err := ctrlbz.Seek(int64(HeaderLen), io.SeekStart); err != nil {
 		return err
 	}
-	cpf, err := bzip2.NewReader(cpfbz2, nil)
+	ctrl, err := bzip2.NewReader(ctrlbz, nil)
 	if err != nil {
 		return err
 	}
-	dpfbz2 := bytes.NewReader(patch)
-	if _, err := dpfbz2.Seek(int64(HeaderLen)+bzctrllen, io.SeekStart); err != nil {
+	databz := bytes.NewReader(patch)
+	if _, err := databz.Seek(int64(HeaderLen)+bzctrllen, io.SeekStart); err != nil {
 		return err
 	}
-	dpf, err := bzip2.NewReader(dpfbz2, nil)
+	data, err := bzip2.NewReader(databz, nil)
 	if err != nil {
 		return err
 	}
-	epfbz2 := bytes.NewReader(patch)
-	if _, err := epfbz2.Seek(int64(HeaderLen)+bzctrllen+bzdatalen, io.SeekStart); err != nil {
+	xtrabz := bytes.NewReader(patch)
+	if _, err := xtrabz.Seek(int64(HeaderLen)+bzctrllen+bzdatalen, io.SeekStart); err != nil {
 		return err
 	}
-	epf, err := bzip2.NewReader(epfbz2, nil)
+	xtra, err := bzip2.NewReader(xtrabz, nil)
 	if err != nil {
 		return err
 	}
 
-	xbyteadd := newByteAddReader(dpf, oldf)
+	xbyteadd := newByteAddReader(data, oldf)
 
 	for newfwc.Count() < newsize {
 		// Read control data
-		for i := 0; i <= 2; i++ {
-			lenread, err = zreadall(cpf, hdbuf, 8)
+		for i := 0; i < 2; i++ {
+			lenread, err := io.ReadFull(ctrl, hdbuf)
 			if lenread != 8 || (err != nil && err != io.EOF) {
 				// format "corrupt patch or bz stream ended: control data read (lenread/8) err.Error()"
-				return newCorruptPatchBzEndError(lenread, 8, "control data", err)
+				return newCorruptPatchBzEndError(int64(lenread), 8, "control data", err)
 			}
-			ctrl[i] = offtin(hdbuf)
+			ctrip[i] = offtin(hdbuf)
 		}
 
-		if newfwc.Count()+ctrl[x] > newsize {
+		if newfwc.Count()+ctrip[x] > newsize {
 			return newCorruptPatchError("newfile pos + data block exceeds expected newfile size")
 		}
 
 		// Read x bytes from diff + old into new file
-		lenread, err = io.CopyBuffer(newfwc, io.LimitReader(xbyteadd, ctrl[x]), cpBuf)
-		if lenread < ctrl[x] || (err != nil && err != io.EOF) {
-			return newCorruptPatchBzEndError(lenread, ctrl[x], "x data block", err)
+		lenread, err = io.CopyBuffer(newfwc, io.LimitReader(xbyteadd, ctrip[x]), cpBuf)
+		if lenread < ctrip[x] || (err != nil && err != io.EOF) {
+			return newCorruptPatchBzEndError(lenread, ctrip[x], "x data block", err)
 		}
 
-		if newfwc.Count()+ctrl[y] > newsize {
+		if newfwc.Count()+ctrip[y] > newsize {
 			return newCorruptPatchError("newfile pos + extra block exceeds expected newfile size")
 		}
 
 		// Read y bytes from the extra block into the new file
-		lenread, err = io.CopyBuffer(newfwc, io.LimitReader(epf, ctrl[y]), cpBuf)
-		if lenread < ctrl[y] || (err != nil && err != io.EOF) {
-			return newCorruptPatchBzEndError(lenread, ctrl[y], "y extra block", err)
+		lenread, err = io.CopyBuffer(newfwc, io.LimitReader(xtra, ctrip[y]), cpBuf)
+		if lenread < ctrip[y] || (err != nil && err != io.EOF) {
+			return newCorruptPatchBzEndError(lenread, ctrip[y], "y extra block", err)
 		}
 
 		// Adjust oldfile offset by z
-		_, err = oldf.Seek(ctrl[z], os.SEEK_CUR)
+		_, err = oldf.Seek(ctrip[z], os.SEEK_CUR)
 		if err != nil {
 			return err
 		}
 	}
 
 	// Clean up the bzip2 reads
-	if err = cpf.Close(); err != nil {
+	if err = ctrl.Close(); err != nil {
 		return err
 	}
-	if err = dpf.Close(); err != nil {
+	if err = data.Close(); err != nil {
 		return err
 	}
-	if err = epf.Close(); err != nil {
+	if err = xtra.Close(); err != nil {
 		return err
 	}
-	cpfbz2 = nil
-	dpfbz2 = nil
-	epfbz2 = nil
-	cpf = nil
-	dpf = nil
-	epf = nil
+	ctrlbz = nil
+	databz = nil
+	xtrabz = nil
+	ctrl = nil
+	data = nil
+	xtra = nil
 
 	return nil
 }
@@ -242,7 +242,7 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 func patchb(oldfile, patch []byte) ([]byte, error) {
 	newfby := new(bytes.Buffer)
 	// Use bufio here to emulate File()'s use of bufio for testing
-	newfbuf := bufio.NewWriterSize(newfby, WriteBufferSize)
+	newfbuf := bufio.NewWriterSize(newfby, writeBufferSize)
 	oldfby := bytes.NewReader(oldfile)
 	err := patchStream(oldfby, newfbuf, patch)
 	newfbuf.Flush()
@@ -272,28 +272,6 @@ func offtin(buf []byte) int64 {
 		y = -y
 	}
 	return int64(y)
-}
-
-// epfbz2.Read was not reading all the requested bytes, probably an internal buffer limitation ?
-// it was encapsulated by zreadall to work around the issue
-func zreadall(r io.Reader, b []byte, expected int64) (int64, error) {
-	var allread int64
-	var offset int64
-	for {
-		nreadint, err := r.Read(b[offset:])
-		nread := int64(nreadint)
-		if nread == expected {
-			return nread, err
-		}
-		if err != nil {
-			return allread + nread, err
-		}
-		allread += nread
-		if allread >= expected {
-			return allread, nil
-		}
-		offset += nread
-	}
 }
 
 func min(a, b int) int {

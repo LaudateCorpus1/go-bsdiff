@@ -45,8 +45,8 @@ func TestPatch(t *testing.T) {
 	}
 
 	tests := []struct {
-		wbufsz int
-		rbufsz int
+		wbufsz  int
+		cpbufsz int
 	}{
 		{50, 50},
 		{19, 19},
@@ -62,10 +62,10 @@ func TestPatch(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		WriteBufferSize = test.wbufsz
-		ReadBufferSize = test.rbufsz
+		writeBufferSize = test.wbufsz
+		copyBufferSize = test.cpbufsz
 
-		desc := fmt.Sprintf("WriteBufferSize: %v, ReadBufferSize: %v", WriteBufferSize, ReadBufferSize)
+		desc := fmt.Sprintf("writeBufferSize: %v, copyBufferSize: %v", writeBufferSize, copyBufferSize)
 		newfile, err := Bytes(oldfile, patchfile)
 		if err != nil {
 			t.Errorf("With %s failed with error: %s", desc, err.Error())
@@ -296,28 +296,4 @@ func (r *lowcaprdr) Read(b []byte) (int, error) {
 	copy(r.read[r.n:], b)
 	r.n += len(b)
 	return len(b), nil
-}
-
-func TestZReadAll(t *testing.T) {
-	buf := []byte{
-		0x10, 0x10, 0x10, 0x10, 0x20, 0x20, 0x20, 0x20,
-		0x30, 0x30, 0x30, 0x30, 0x40, 0x40, 0x40, 0x40,
-		0x43,
-	}
-	rr := &lowcaprdr{
-		read: make([]byte, 1024),
-	}
-	nr, err := zreadall(rr, buf, int64(len(buf)))
-	if err != nil {
-		t.Fail()
-	}
-	if nr != int64(len(buf)) {
-		t.Fail()
-	}
-	if buf[16] != rr.read[16] {
-		t.Fail()
-	}
-	if buf[7] != rr.read[7] {
-		t.Fail()
-	}
 }

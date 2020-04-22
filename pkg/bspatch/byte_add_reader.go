@@ -9,49 +9,53 @@ import (
 var ErrUnequalReads = errors.New("byteAdder.Read: did not read equal number of bytes from both readers")
 
 type byteAddReader struct {
-	r1   io.Reader
-	r2   io.Reader
-	addb []byte
+	r1  io.Reader
+	r2  io.Reader
+	tmp [1]byte
 }
 
 func newByteAddReader(r1 io.Reader, r2 io.Reader) byteAddReader {
+	// Temp buffer for reading edge case.
+	var t [1]byte
 	return byteAddReader{
-		r1:   r1,
-		r2:   r2,
-		addb: make([]byte, ReadBufferSize),
+		r1:  r1,
+		r2:  r2,
+		tmp: t,
 	}
 }
 
 // Read adds the bytes of the two readers and writes to using p as scratch space.
-func (ba byteAddReader) Read(p []byte) (written int, err error) {
-	chunk := min(len(p), ReadBufferSize)
+// It writes half of len(p) at a time to avoid using an internal buffer;
+// it is up to the client to specify the buffer size.
+func (ba byteAddReader) Read(p []byte) (int, error) {
+	var n1, n2 int
+	var err1, err2, err error
 
-	for written < len(p) {
-		r1n, r1err := ba.r1.Read(ba.addb[:min(chunk, len(p)-written)])
-		r2n, r2err := ba.r2.Read(p[written:min(written+chunk, len(p))])
-		n := min(r1n, r2n)
-
-		for i := 0; i < n; i++ {
-			p[written+i] += ba.addb[i]
-		}
-		written += n
-
-		switch {
-		case r1n != r2n:
-			err = ErrUnequalReads
-			return
-		case r1err == nil && r2err == nil:
-			continue
-		case isNilorEOF(r1err) && isNilorEOF(r2err):
-			err = io.EOF
-			return
-		case !isNilorEOF(r1err) || !isNilorEOF(r2err):
-			err = fmt.Errorf("%s, %s", r1err, r2err)
-			return
+	if len(p) == 1 {
+		n1, err1 = ba.r1.Read(ba.tmp[:])
+		n2, err2 = ba.r2.Read(p)
+		p[0] += ba.tmp[0]
+	} else {
+		limit := len(p) / 2
+		n1, err1 = ba.r1.Read(p[:limit])
+		n2, err2 = ba.r2.Read(p[limit : limit+n1])
+		for i, b := range p[limit : limit+n2] {
+			p[i] += b
 		}
 	}
 
-	return
+	switch {
+	case n1 != n2:
+		err = ErrUnequalReads
+	case err1 == nil && err2 == nil:
+		err = nil
+	case isNilorEOF(err1) && isNilorEOF(err2):
+		err = io.EOF
+	case !isNilorEOF(err1) || !isNilorEOF(err2):
+		err = fmt.Errorf("%s, %s", err1, err2)
+	}
+
+	return n2, err
 }
 
 func isNilorEOF(err error) bool {
