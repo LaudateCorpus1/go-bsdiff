@@ -97,22 +97,15 @@ func File(oldfile, newfile, patchfile string) error {
 	return nil
 }
 
+type ctrlTriple [3]int64
+
+func (c *ctrlTriple) sum() int64 { return c[0] }
+
+func (c *ctrlTriple) copy() int64 { return c[1] }
+
+func (c *ctrlTriple) seek() int64 { return c[2] }
+
 func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
-	const HeaderLen = 32
-
-	// Reused container vars
-	var lenread int64
-	var errmsg string
-	header := make([]byte, HeaderLen)
-	hdbuf := make([]byte, 8)
-	ctrip := make([]int64, 3)
-	// ctrl triple indices
-	var x, y, z = 0, 1, 2
-	cpBuf := make([]byte, copyBufferSize)
-
-	// Counter used for sanity checks
-	newfwc := newWriteCounter(newf)
-
 	//	File format:
 	//		0	8	"BSDIFF40"
 	//		8	8	X
@@ -121,9 +114,24 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 	//		32	X	bzip2(control block)
 	//		32+X	Y	bzip2(diff block)
 	//		32+X+Y	???	bzip2(extra block)
-	//	with control block a set of triples (x,y,z) meaning "add x bytes
-	//	from oldfile to x bytes from the diff block; copy y bytes from the
-	//	extra block; seek forwards in oldfile by z bytes".
+	//  The control block contains sets of triples (x,y,z) meaning:
+	//  a) add x bytes from old file to x bytes from the diff block and copy
+	//  b) copy y bytes from the extra block
+	//  c) seek in the oldfile by z bytes
+	//  Note that z can be negative.
+
+	const HeaderLen = 32
+
+	// Reused container vars
+	var lenread int64
+	var errmsg string
+	header := make([]byte, HeaderLen)
+	hdbuf := make([]byte, 8)
+	ctrip := &ctrlTriple{}
+	cpBuf := make([]byte, copyBufferSize)
+
+	// Counter used for sanity checks
+	newfwc := newWriteCounter(newf)
 
 	// Read the patch header
 	p := bytes.NewReader(patch)
@@ -192,28 +200,28 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 			ctrip[i] = offtin(hdbuf)
 		}
 
-		if newfwc.Count()+ctrip[x] > newsize {
+		if newfwc.Count()+ctrip.sum() > newsize {
 			return newCorruptPatchError("newfile pos + data block exceeds expected newfile size")
 		}
 
 		// Read x bytes from diff + old into new file
-		lenread, err = io.CopyBuffer(newfwc, io.LimitReader(xbyteadd, ctrip[x]), cpBuf)
-		if lenread < ctrip[x] || (err != nil && err != io.EOF) {
-			return newCorruptPatchBzEndError(lenread, ctrip[x], "x data block", err)
+		lenread, err = io.CopyBuffer(newfwc, io.LimitReader(xbyteadd, ctrip.sum()), cpBuf)
+		if lenread < ctrip.sum() || (err != nil && err != io.EOF) {
+			return newCorruptPatchBzEndError(lenread, ctrip.sum(), "x data block", err)
 		}
 
-		if newfwc.Count()+ctrip[y] > newsize {
+		if newfwc.Count()+ctrip.copy() > newsize {
 			return newCorruptPatchError("newfile pos + extra block exceeds expected newfile size")
 		}
 
-		// Read y bytes from the extra block into the new file
-		lenread, err = io.CopyBuffer(newfwc, io.LimitReader(xtra, ctrip[y]), cpBuf)
-		if lenread < ctrip[y] || (err != nil && err != io.EOF) {
-			return newCorruptPatchBzEndError(lenread, ctrip[y], "y extra block", err)
+		// Read bytes from the extra block into the new file
+		lenread, err = io.CopyBuffer(newfwc, io.LimitReader(xtra, ctrip.copy()), cpBuf)
+		if lenread < ctrip.copy() || (err != nil && err != io.EOF) {
+			return newCorruptPatchBzEndError(lenread, ctrip.copy(), "y extra block", err)
 		}
 
-		// Adjust oldfile offset by z
-		_, err = oldf.Seek(ctrip[z], os.SEEK_CUR)
+		// Adjust oldfile offset by ctrl triple
+		_, err = oldf.Seek(ctrip.seek(), os.SEEK_CUR)
 		if err != nil {
 			return err
 		}
