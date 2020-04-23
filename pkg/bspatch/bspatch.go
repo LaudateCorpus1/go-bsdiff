@@ -34,7 +34,7 @@ import (
 	"os"
 
 	"github.com/dsnet/compress/bzip2"
-	"github.com/gabstv/go-bsdiff/pkg/util"
+	"github.com/kiteco/go-bsdiff/pkg/util"
 )
 
 // Variables for streaming
