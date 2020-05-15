@@ -27,6 +27,7 @@ package bsdiff
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -78,6 +79,20 @@ func File(oldfile, newfile, patchfile string) error {
 }
 
 func diffb(oldbin, newbin []byte) ([]byte, error) {
+	// File format:
+	// --- header ---
+	//  0     -  7       : "BSDIFF40"
+	//  8     - 15       : X
+	// 16     - 23       : Y
+	// 24     - 31       : len(newfile)
+	// 32     - 63       : sha256sum(oldfile)
+	// ---  data  ---
+	// 64     - 64+X-1   : bzip2(control block)
+	// 64+X   - 64+X+Y-1 : bzip2(diff block)
+	// 64+X+Y - ??       : bzip2(extra block)
+
+	const headerLen = 64
+
 	bziprule := &bzip2.WriterConfig{
 		Level: bzip2.BestCompression,
 	}
@@ -89,28 +104,28 @@ func diffb(oldbin, newbin []byte) ([]byte, error) {
 
 	// create the patch file
 	pf := new(util.BufWriter)
-
-	// Header is
-	//	0	8	 "BSDIFF40"
-	//	8	8	length of bzip2ed ctrl block
-	//	16	8	length of bzip2ed diff block
-	//	24	8	length of pnew file */
-	// File is
-	//  0	32	Header
-	//  32	??	Bzip2ed ctrl block
-	//  ??	??	Bzip2ed diff block
-	//  ??	??	Bzip2ed extra block
+	buf := make([]byte, 8)
 
 	newsize := len(newbin)
 	oldsize := len(oldbin)
 
-	header := make([]byte, 32)
-	buf := make([]byte, 8)
-
+	// - header
+	// total length is 64, but the checksum (32 bytes) appends to the slice,
+	header := make([]byte, 32, headerLen)
 	copy(header, []byte("BSDIFF40"))
 	offtout(0, header[8:])
 	offtout(0, header[16:])
 	offtout(newsize, header[24:])
+
+	sum := sha256.New()
+	if _, err := sum.Write(oldbin); err != nil {
+		return nil, err
+	}
+	if sum.Size() != 32 {
+		panic("unexpected: sha256sum size is not 32 bytes")
+	}
+	header = sum.Sum(header) // appends to header
+
 	if _, err := pf.Write(header); err != nil {
 		return nil, err
 	}
@@ -254,7 +269,7 @@ func diffb(oldbin, newbin []byte) ([]byte, error) {
 
 	// Compute size of compressed ctrl data
 	ln = pf.Len()
-	offtout(ln-32, header[8:])
+	offtout(ln-headerLen, header[8:])
 
 	// Write compressed diff data
 	pfbz2, err = bzip2.NewWriter(pf, bziprule)
