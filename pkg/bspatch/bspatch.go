@@ -29,7 +29,6 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -166,7 +165,7 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 	}
 	actualSum := sum.Sum(nil)
 	if !bytes.Equal(expectedSum, actualSum) {
-		return fmt.Errorf("Invalid input checksum: expected %s, but got %s", hex.Dump(expectedSum), hex.Dump(actualSum))
+		return fmt.Errorf("Invalid input checksum: expected % x, but got % x", expectedSum, actualSum)
 	}
 	oldf.Seek(0, io.SeekStart) // reset oldf
 
