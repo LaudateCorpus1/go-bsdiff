@@ -120,14 +120,14 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 	//  c) seek in the oldfile by z bytes
 	//  Note that z can be negative.
 
-	const HeaderLen = 32
+	const HeaderLen int64 = 32
 
 	// Reused container vars
 	var lenread int64
 	var errmsg string
 	header := make([]byte, HeaderLen)
 	hdbuf := make([]byte, 8)
-	ctrip := &ctrlTriple{}
+	var ctrip ctrlTriple
 	cpBuf := make([]byte, copyBufferSize)
 
 	// Counter used for sanity checks
@@ -140,7 +140,7 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 	if err != nil {
 		return newCorruptPatchError(err.Error())
 	}
-	if n < HeaderLen {
+	if int64(n) < HeaderLen {
 		errmsg = fmt.Sprintf("short header read (n %v < %v)", n, HeaderLen)
 		return newCorruptPatchError(errmsg)
 	}
@@ -163,7 +163,7 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 	// Close patch file and re-open it via libbzip2 at the right places
 	p = nil
 	ctrlbz := bytes.NewReader(patch)
-	if _, err := ctrlbz.Seek(int64(HeaderLen), io.SeekStart); err != nil {
+	if _, err := ctrlbz.Seek(HeaderLen, io.SeekStart); err != nil {
 		return err
 	}
 	ctrl, err := bzip2.NewReader(ctrlbz, nil)
@@ -171,7 +171,7 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 		return err
 	}
 	databz := bytes.NewReader(patch)
-	if _, err := databz.Seek(int64(HeaderLen)+bzctrllen, io.SeekStart); err != nil {
+	if _, err := databz.Seek(HeaderLen+bzctrllen, io.SeekStart); err != nil {
 		return err
 	}
 	data, err := bzip2.NewReader(databz, nil)
@@ -179,7 +179,7 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 		return err
 	}
 	xtrabz := bytes.NewReader(patch)
-	if _, err := xtrabz.Seek(int64(HeaderLen)+bzctrllen+bzdatalen, io.SeekStart); err != nil {
+	if _, err := xtrabz.Seek(HeaderLen+bzctrllen+bzdatalen, io.SeekStart); err != nil {
 		return err
 	}
 	xtra, err := bzip2.NewReader(xtrabz, nil)
@@ -191,7 +191,7 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 
 	for newfwc.Count() < newsize {
 		// Read control data
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 3; i++ {
 			lenread, err := io.ReadFull(ctrl, hdbuf)
 			if lenread != 8 || (err != nil && err != io.EOF) {
 				// format "corrupt patch or bz stream ended: control data read (lenread/8) err.Error()"
