@@ -373,30 +373,50 @@ func qsufsort(iii []int, buf []byte) {
 	var i, h, ln int
 	bufzise := len(buf)
 
+	// -- Phase 0 --
+	// Bucket sort (into iii) the natural numbers i = 0, ..., len(buf) based on the value buf[i].
+
+	// count number of occurrences of each byte value
 	for i = 0; i < bufzise; i++ {
 		buckets[buf[i]]++
 	}
 
+	// prefix sum of buckets -> offsets into iii where each bucket starts
 	for i = 1; i < 256; i++ {
 		buckets[i] += buckets[i-1]
 	}
-
 	for i = 255; i > 0; i-- {
 		buckets[i] = buckets[i-1]
 	}
 	buckets[0] = 0
 
+	// populate iii based on bucket offsets
 	for i = 0; i < bufzise; i++ {
 		buckets[buf[i]]++
 		iii[buckets[buf[i]]] = i
 	}
 	iii[0] = bufzise
 
+	// vvv is the inverse of iii: for each index i = 0, ..., len(buf), store its sort ordering in iii.
 	for i = 0; i < bufzise; i++ {
 		vvv[i] = buckets[buf[i]]
 	}
 	vvv[bufzise] = 0
 
+	// At this point, iii contains the "1-order" of buf.
+	// The "h-order" for h>0 is the ordering of
+	//   - the substrings of buf of length exactly h, and
+	//   - the suffixes of buf of length less than h
+	// Note that there are exactly n non-empty strings in the h-order for all h,
+	// uniquely identified by their start offset in buf.
+
+	// Next, we track groups of consecutive suffixes already in their final positions by
+	// storing -x at the first such suffix in each group, where x in the size of the group.
+	// This is non-destructive, since we still have vvv, the inverse of iii.
+
+	// Currently, if a bucket has size 1, it's already in its final suffix-sort order.
+	// Otherwise, it may not be. So store -1 at all size-1 bucket positions.
+	// Note that groups are not yet "coalesced," so multiple groups may be adjacent.
 	for i = 1; i < 256; i++ {
 		if buckets[i] == buckets[i-1]+1 {
 			iii[buckets[i]] = -1
@@ -404,18 +424,24 @@ func qsufsort(iii []int, buf []byte) {
 	}
 	iii[0] = -1
 
+	// -- Phase 1 --
+	// Repeatedly double h, maintaining vvv = the inverse of the h-order of buf.
+	// Coalesce groups of suffixes in their final positions, indicated by negative values in iii.
 	for h = 1; iii[0] != -(bufzise + 1); h += h {
-		ln = 0
+		ln = 0 // used to track the size of the coalesced group
 
 		i = 0
 		for i < bufzise+1 {
 			if iii[i] < 0 {
+				// at a group of suffixes in their final positions, skip it
 				ln -= iii[i]
 				i -= iii[i]
 			} else {
 				if ln != 0 {
+					// coalesce all the groups we just saw into one.
 					iii[i-ln] = -ln
 				}
+				// TODO(naman) when would this not be 1?
 				ln = vvv[iii[i]] + 1 - i
 				split(iii, vvv, i, ln, h)
 				i += ln
