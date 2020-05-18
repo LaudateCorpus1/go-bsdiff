@@ -28,6 +28,7 @@ package bspatch
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -106,42 +107,48 @@ func (c *ctrlTriple) copy() int64 { return c[1] }
 func (c *ctrlTriple) seek() int64 { return c[2] }
 
 func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
-	//	File format:
-	//		0	8	"BSDIFF40"
-	//		8	8	X
-	//		16	8	Y
-	//		24	8	sizeof(newfile)
-	//		32	X	bzip2(control block)
-	//		32+X	Y	bzip2(diff block)
-	//		32+X+Y	???	bzip2(extra block)
+	// File format:
+	// --- header ---
+	//  0     -  7       : "BSDIFF40"
+	//  8     - 15       : X
+	// 16     - 23       : Y
+	// 24     - 31       : len(newfile)
+	// 32     - 63       : sha256sum(oldfile)
+	// ---  data  ---
+	// 64     - 64+X-1   : bzip2(control block)
+	// 64+X   - 64+X+Y-1 : bzip2(diff block)
+	// 64+X+Y - ??       : bzip2(extra block)
+
 	//  The control block contains sets of triples (x,y,z) meaning:
 	//  a) add x bytes from old file to x bytes from the diff block and copy
 	//  b) copy y bytes from the extra block
 	//  c) seek in the oldfile by z bytes
 	//  Note that z can be negative.
 
-	const HeaderLen int64 = 32
+	const headerLen int64 = 64
+
+	cpBuf := make([]byte, copyBufferSize)
 
 	// Reused container vars
 	var lenread int64
 	var errmsg string
-	header := make([]byte, HeaderLen)
+	header := make([]byte, headerLen)
 	hdbuf := make([]byte, 8)
 	var ctrip ctrlTriple
-	cpBuf := make([]byte, copyBufferSize)
 
 	// Counter used for sanity checks
 	newfwc := newWriteCounter(newf)
 
 	// Read the patch header
 	p := bytes.NewReader(patch)
+	// bytes.Reader always reads as much as possible
 	n, err := p.Read(header)
 
 	if err != nil {
 		return newCorruptPatchError(err.Error())
 	}
-	if int64(n) < HeaderLen {
-		errmsg = fmt.Sprintf("short header read (n %v < %v)", n, HeaderLen)
+	if int64(n) < headerLen {
+		errmsg = fmt.Sprintf("short header read (n %v < %v)", n, headerLen)
 		return newCorruptPatchError(errmsg)
 	}
 
@@ -150,11 +157,22 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 		return newCorruptPatchError("incorrect magic number (header BSDIFF40)")
 	}
 
+	// check input file checksum
+	expectedSum := header[32:]
+	sum := sha256.New()
+	if _, err := io.CopyBuffer(sum, oldf, cpBuf); err != nil {
+		return err
+	}
+	actualSum := sum.Sum(nil)
+	if !bytes.Equal(expectedSum, actualSum) {
+		return fmt.Errorf("Invalid input checksum: expected % x, but got % x", expectedSum, actualSum)
+	}
+	oldf.Seek(0, io.SeekStart) // reset oldf
+
 	// Read lengths from header
 	bzctrllen := offtin(header[8:])
 	bzdatalen := offtin(header[16:])
 	newsize := offtin(header[24:])
-
 	if bzctrllen < 0 || bzdatalen < 0 || newsize < 0 {
 		errmsg = fmt.Sprintf("negative length block(s) read from header (bzctrllen %v bzdatalen %v newsize %v)", bzctrllen, bzdatalen, newsize)
 		return newCorruptPatchError(errmsg)
@@ -163,7 +181,7 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 	// Close patch file and re-open it via libbzip2 at the right places
 	p = nil
 	ctrlbz := bytes.NewReader(patch)
-	if _, err := ctrlbz.Seek(HeaderLen, io.SeekStart); err != nil {
+	if _, err := ctrlbz.Seek(headerLen, io.SeekStart); err != nil {
 		return err
 	}
 	ctrl, err := bzip2.NewReader(ctrlbz, nil)
@@ -171,7 +189,7 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 		return err
 	}
 	databz := bytes.NewReader(patch)
-	if _, err := databz.Seek(HeaderLen+bzctrllen, io.SeekStart); err != nil {
+	if _, err := databz.Seek(headerLen+bzctrllen, io.SeekStart); err != nil {
 		return err
 	}
 	data, err := bzip2.NewReader(databz, nil)
@@ -179,7 +197,7 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 		return err
 	}
 	xtrabz := bytes.NewReader(patch)
-	if _, err := xtrabz.Seek(HeaderLen+bzctrllen+bzdatalen, io.SeekStart); err != nil {
+	if _, err := xtrabz.Seek(headerLen+bzctrllen+bzdatalen, io.SeekStart); err != nil {
 		return err
 	}
 	xtra, err := bzip2.NewReader(xtrabz, nil)
@@ -221,7 +239,7 @@ func patchStream(oldf io.ReadSeeker, newf io.Writer, patch []byte) error {
 		}
 
 		// Adjust oldfile offset by ctrl triple
-		_, err = oldf.Seek(ctrip.seek(), os.SEEK_CUR)
+		_, err = oldf.Seek(ctrip.seek(), io.SeekCurrent)
 		if err != nil {
 			return err
 		}
