@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kiteco/go-bsdiff/pkg/util"
+	"github.com/kiteco/go-bsdiff/v2/pkg/util"
 )
 
 var (

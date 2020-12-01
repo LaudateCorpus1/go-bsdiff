@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/kiteco/go-bsdiff/pkg/bsdiff"
+	"github.com/kiteco/go-bsdiff/v2/pkg/bsdiff"
 )
 
 func main() {

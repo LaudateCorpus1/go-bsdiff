@@ -1,11 +1,11 @@
 # go-bsdiff
 Pure Go implementation of [bsdiff](http://www.daemonology.net/bsdiff/) 4.
 
-[![GoDoc](https://godoc.org/github.com/kiteco/go-bsdiff?status.svg)](https://godoc.org/github.com/kiteco/go-bsdiff)
-[![Go Report Card](https://goreportcard.com/badge/github.com/kiteco/go-bsdiff)](https://goreportcard.com/report/github.com/kiteco/go-bsdiff)
-[![Build Status](https://travis-ci.org/kiteco/go-bsdiff.svg?branch=master)](https://travis-ci.org/kiteco/go-bsdiff)
-[![Coverage Status](https://coveralls.io/repos/github/kiteco/go-bsdiff/badge.svg?branch=master)](https://coveralls.io/github/kiteco/go-bsdiff?branch=master)
-<!--[![codecov](https://codecov.io/gh/kiteco/go-bsdiff/branch/master/graph/badge.svg)](https://codecov.io/gh/kiteco/go-bsdiff)-->
+[![GoDoc](https://godoc.org/github.com/kiteco/go-bsdiff/v2?status.svg)](https://godoc.org/github.com/kiteco/go-bsdiff/v2)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kiteco/go-bsdiff/v2)](https://goreportcard.com/report/github.com/kiteco/go-bsdiff/v2)
+[![Build Status](https://travis-ci.org/kiteco/go-bsdiff/v2.svg?branch=master)](https://travis-ci.org/kiteco/go-bsdiff/v2)
+[![Coverage Status](https://coveralls.io/repos/github/kiteco/go-bsdiff/v2/badge.svg?branch=master)](https://coveralls.io/github/kiteco/go-bsdiff/v2?branch=master)
+<!--[![codecov](https://codecov.io/gh/kiteco/go-bsdiff/v2/branch/master/graph/badge.svg)](https://codecov.io/gh/kiteco/go-bsdiff/v2)-->
 
 bsdiff and bspatch are tools for building and applying patches to binary files. By using suffix sorting (specifically, Larsson and Sadakane's [qsufsort](http://www.larsson.dogma.net/ssrev-tr.pdf)) and taking advantage of how executable files change.
 
@@ -21,8 +21,8 @@ import (
   "fmt"
   "bytes"
 
-  "github.com/kiteco/go-bsdiff/pkg/bsdiff"
-  "github.com/kiteco/go-bsdiff/pkg/bspatch"
+  "github.com/kiteco/go-bsdiff/v2/pkg/bsdiff"
+  "github.com/kiteco/go-bsdiff/v2/pkg/bspatch"
 )
 
 func main(){
@@ -55,8 +55,8 @@ import (
   "fmt"
   "bytes"
 
-  "github.com/kiteco/go-bsdiff/pkg/bsdiff"
-  "github.com/kiteco/go-bsdiff/pkg/bspatch"
+  "github.com/kiteco/go-bsdiff/v2/pkg/bsdiff"
+  "github.com/kiteco/go-bsdiff/v2/pkg/bspatch"
 )
 
 func main(){
@@ -82,7 +82,7 @@ func main(){
 
 ## As a program (CLI)
 ```sh
-go get -u -v github.com/kiteco/go-bsdiff/cmd/...
+go get -u -v github.com/kiteco/go-bsdiff/v2/cmd/...
 
 bsdiff oldfile newfile patch
 bspatch oldfile newfile2 patch

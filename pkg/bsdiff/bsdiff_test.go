@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kiteco/go-bsdiff/pkg/util"
+	"github.com/kiteco/go-bsdiff/v2/pkg/util"
 )
 
 func TestDiff(t *testing.T) {

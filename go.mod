@@ -1,4 +1,4 @@
-module github.com/kiteco/go-bsdiff
+module github.com/kiteco/go-bsdiff/v2
 
 go 1.14
 
